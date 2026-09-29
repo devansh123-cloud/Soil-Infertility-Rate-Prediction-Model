@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgriSmart: Live Soil Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --bg:#eceee6; --panel:#f8f9f5; --ink:#1c271d; --muted:#5c6b5d; --line:#d3d9cb;
+  --green:#3f6b3a; --green-soft:#dfe9d9; --wheat:#a87c14; --red:#b3382c; --blue:#2f6f9f;
+  --display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;
+  --body:'Instrument Sans','Segoe UI',system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#131a14; --panel:#1a231b; --ink:#e6ece4; --muted:#93a293; --line:#2c372d;
+        --green:#7fb26f; --green-soft:#24331f; --wheat:#d9ab3a; --red:#e0685a; --blue:#6aa8d6}
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+
+/* Header */
+.top{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem clamp(1rem,3vw,2rem);border-bottom:1px solid var(--line)}
+.brand{font-family:var(--display);font-weight:700;font-size:1.5rem;letter-spacing:-.01em}
+.tagline{color:var(--muted);flex:1;min-width:14rem}
+.pill{display:inline-flex;align-items:center;gap:.5rem;padding:.25rem .8rem;border:1px solid var(--line);border-radius:999px;font-size:.875rem;background:var(--panel)}
+.dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--muted)}
+.dot.ok{background:var(--green)} .dot.bad{background:var(--red)}
+
+/* Layout */
+.layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr);gap:clamp(1rem,2.5vw,2rem);padding:clamp(1rem,3vw,2rem);max-width:1500px;margin:0 auto}
+@media (max-width:920px){.layout{grid-template-columns:1fr}}
+
+/* Map */
+.mapwrap{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}
+#map{height:clamp(320px,50vh,540px);width:100%;z-index:0}
+.map-tools{position:absolute;top:.75rem;right:.75rem;z-index:500;display:flex;gap:.4rem}
+.map-tools button{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.35rem .7rem;cursor:pointer;font-size:.875rem}
+.map-tools button[aria-pressed=true]{background:var(--green);color:#fff;border-color:var(--green)}
+.map-msg{position:absolute;left:.75rem;bottom:.75rem;z-index:500;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.4rem .8rem;font-size:.9rem;max-width:calc(100% - 1.5rem)}
+.spin{display:inline-block;width:.9em;height:.9em;border:2px solid var(--line);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-.1em;margin-right:.4rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.soilread{display:flex;flex-wrap:wrap;gap:.5rem 2rem;padding:1rem .25rem;min-height:4.2rem;align-items:baseline}
+.soilread .hint{color:var(--muted)}
+.soilread .stat b{font-family:var(--display);font-size:1.5rem;font-weight:700;margin-right:.3rem}
+.soilread .stat span{color:var(--muted);font-size:.9rem}
+.where{flex-basis:100%;color:var(--muted);font-size:.875rem}
+
+/* Controls */
+.controls-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem;margin:.5rem 0 1rem}
+h2,h3{font-family:var(--display);margin:0;letter-spacing:-.01em}
+h3{font-size:1.1rem}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap}
+.chip{background:transparent;border:1px solid var(--line);border-radius:999px;padding:.25rem .85rem;cursor:pointer;font-size:.9rem}
+.chip:hover:not(:disabled){border-color:var(--green)}
+.chip:disabled{opacity:.45;cursor:not-allowed}
+.sliders{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1.1rem 2rem}
+.ctl label{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.5rem;font-weight:500}
+.ctl output{font-variant-numeric:tabular-nums;color:var(--green);font-weight:600}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:3px;cursor:pointer;
+  background:linear-gradient(90deg,var(--green) var(--pct,50%),var(--line) var(--pct,50%))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--panel);border:3px solid var(--green)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--panel);border:3px solid var(--green)}
+
+/* Results */
+.results{align-self:start;position:sticky;top:1rem;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+@media (max-width:920px){.results{position:static}}
+.sec{padding:1.2rem 1.4rem;border-top:1px solid var(--line)}
+.sec:first-child{border-top:0}
+.sec.busy{opacity:.55;transition:opacity .2s}
+.crop{font-family:var(--display);font-weight:700;font-size:clamp(2.4rem,5vw,3.4rem);line-height:1.05;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere}
+.sub{color:var(--muted);margin:.35rem 0 0}
+.ph-head{display:flex;justify-content:space-between;align-items:baseline}
+.ph-head b{font-family:var(--display);font-size:1.5rem}
+.ph-track{position:relative;height:14px;border-radius:7px;margin:.7rem 0 .4rem;
+  background:linear-gradient(90deg,#b3382c 0%,#d98e2b 20%,#c9b83a 32%,#4c7a34 38%,#4c7a34 62%,#2f6f9f 80%,#5b4a8a 100%)}
+.ph-marker{position:absolute;top:-6px;width:5px;height:26px;border-radius:3px;background:#fff;border:2px solid #22201c;transition:left .35s ease}
+.ph-scale{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted)}
+.score-row{display:flex;justify-content:space-between;align-items:center;gap:1rem}
+.score-num{font-family:var(--display);font-size:2.2rem;font-weight:700;font-variant-numeric:tabular-nums}
+.score-num small{font-size:1rem;color:var(--muted);font-weight:500}
+.badge{padding:.2rem .85rem;border-radius:999px;color:#fff;font-weight:600;font-size:.9rem;transition:background .3s}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:.6rem}
+.bar i{display:block;height:100%;width:0;border-radius:4px;transition:width .5s ease,background .3s}
+.matches{display:grid;gap:.7rem;margin-top:.8rem}
+.match{display:grid;grid-template-columns:6.5rem 1fr 3rem;gap:.7rem;align-items:center;font-size:.95rem}
+.match span:last-child{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.match .bar{margin:0}
+.econ{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.7rem}
+.econ b{display:block;font-family:var(--display);font-size:1.3rem}
+.econ span{color:var(--muted);font-size:.875rem}
+.note{color:var(--muted);font-size:.8rem;margin:.7rem 0 0}
+.tips{margin:.7rem 0 0;padding:0;list-style:none;display:grid;gap:.5rem}
+.tips li{padding-left:1rem;border-left:3px solid var(--green)}
+.tips.warn li{border-color:var(--wheat)}
+.btn{width:100%;padding:.75rem 1rem;border-radius:10px;border:0;background:var(--green);color:#fff;font-weight:600;cursor:pointer}
+.btn:hover:not(:disabled){filter:brightness(1.08)}
+.btn:disabled{opacity:.6;cursor:progress}
+.err{margin:1rem 1.4rem;padding:.8rem 1rem;border-radius:8px;border:1px solid var(--red);color:var(--red)}
+
+/* Toast */
+#toast{position:fixed;left:50%;bottom:1.5rem;transform:translate(-50%,2rem);opacity:0;pointer-events:none;z-index:2000;
+  background:var(--ink);color:var(--bg);padding:.6rem 1.1rem;border-radius:10px;max-width:90vw;transition:all .3s ease}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">AgriSmart</div>
+  <div class="tagline">Click a field on the map and see what will grow there.</div>
+  <span class="pill" id="source"><span class="dot"></span><span>Manual inputs</span></span>
+  <span class="pill" id="health"><span class="dot"></span><span>Checking model</span></span>
+</header>
+
+<main class="layout">
+  <section aria-label="Field inputs">
+    <div class="mapwrap">
+      <div id="map" aria-label="World map. Click to select a field."></div>
+      <div class="map-tools">
+        <button id="btnStreet" aria-pressed="true">Street</button>
+        <button id="btnSat" aria-pressed="false">Satellite</button>
+        <button id="btnLoc">My location</button>
+      </div>
+      <div class="map-msg" id="mapMsg" hidden></div>
+    </div>
+
+    <div class="soilread" id="soilRead" aria-live="polite">
+      <span class="hint">Click anywhere on land to read its topsoil.</span>
+    </div>
+
+    <div class="controls-head">
+      <h3>Field conditions</h3>
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="sliders" id="sliders"></div>
+  </section>
+
+  <aside class="results" id="results" aria-label="Analysis" aria-live="polite">
+    <div class="err" id="errBox" hidden></div>
+
+    <div class="sec">
+      <p class="sub" style="margin:0 0 .3rem">Best crop for these conditions</p>
+      <h2 class="crop" id="cropName">Analysing</h2>
+      <p class="sub" id="cropConf">&nbsp;</p>
+    </div>
+
+    <div class="sec">
+      <div class="ph-head"><span>Soil pH</span><b id="phValue">6.5</b></div>
+      <div class="ph-track"><div class="ph-marker" id="phMarker"></div></div>
+      <div class="ph-scale"><span>3.5 acidic</span><span>neutral</span><span>10 alkaline</span></div>
+    </div>
+
+    <div class="sec">
+      <div class="score-row">
+        <div class="score-num"><span id="scoreNum">0</span><small> / 100</small><div class="sub" style="font-size:.9rem;font-family:var(--body);font-weight:400">Soil fertility score</div></div>
+        <span class="badge" id="tier">Stable</span>
+      </div>
+      <div class="bar"><i id="scoreFill"></i></div>
+    </div>
+
+    <div class="sec">
+      <h3>Top crop matches</h3>
+      <div class="matches" id="matches"></div>
+    </div>
+
+    <div class="sec">
+      <h3>Economic risk</h3>
+      <div class="econ">
+        <div><b id="yieldImpact">-</b><span>Projected yield impact</span></div>
+        <div><b id="finRisk">-</b><span>Estimated financial risk</span></div>
+      </div>
+      <p class="note">Illustrative planning figures, not a forecast.</p>
+    </div>
+
+    <div class="sec">
+      <h3>Recommendations</h3>
+      <ul class="tips" id="tips"></ul>
+    </div>
+
+    <div class="sec">
+      <button class="btn" id="btnPdf">Download soil health card (PDF)</button>
+    </div>
+  </aside>
+</main>
+
+<div id="toast" role="status"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const FIELDS = [
+  {key:'N', label:'Nitrogen (N)', unit:'kg/ha', min:0, max:140, step:1},
+  {key:'P', label:'Phosphorus (P)', unit:'kg/ha', min:5, max:145, step:1},
+  {key:'K', label:'Potassium (K)', unit:'kg/ha', min:5, max:205, step:1},
+  {key:'ph', label:'Soil pH', unit:'', min:3.5, max:10, step:0.1},
+  {key:'temperature', label:'Temperature', unit:'°C', min:8, max:44, step:0.5},
+  {key:'humidity', label:'Humidity', unit:'%', min:14, max:100, step:1},
+  {key:'rainfall', label:'Rainfall', unit:'mm', min:20, max:300, step:5},
+];
+const DEFAULTS = {N:50, P:45, K:40, temperature:26.5, humidity:65, ph:6.5, rainfall:110};
+const PRESETS = {
+  Tropical:  {temperature:28, humidity:85, rainfall:220},
+  Arid:      {temperature:34, humidity:35, rainfall:45},
+  Temperate: {temperature:18, humidity:65, rainfall:100},
+};
+const TIER_COLOR = {'Stable':'var(--green)', 'Watch':'var(--wheat)', 'High risk':'var(--red)'};
+
+const state = {...DEFAULTS};
+let soil = null, fieldLoc = 'No point selected';
+let lastCrop = null, lastResult = null, predictCtl = null, predictTimer = null, soilReq = 0;
+
+/* ---------- Controls ---------- */
+const inputs = {}, outputs = {};
+const decimals = (step) => (String(step).split('.')[1] || '').length;
+const fmt = (f, v) => Number(v).toFixed(decimals(f.step)) + (f.unit ? ' ' + f.unit : '');
+
+function buildControls() {
+  const wrap = $('#sliders');
+  FIELDS.forEach((f) => {
+    const div = document.createElement('div');
+    div.className = 'ctl';
+    div.innerHTML = `<label for="in_${f.key}">${f.label}<output id="out_${f.key}"></output></label>
+      <input type="range" id="in_${f.key}" min="${f.min}" max="${f.max}" step="${f.step}">`;
+    wrap.appendChild(div);
+    inputs[f.key] = div.querySelector('input');
+    outputs[f.key] = div.querySelector('output');
+    inputs[f.key].addEventListener('input', () => {
+      setValue(f.key, inputs[f.key].value);
+      onChange();
+    });
+    setValue(f.key, state[f.key]);
+  });
+
+  const chips = $('#chips');
+  Object.keys(PRESETS).forEach((name) => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = name;
+    b.addEventListener('click', () => { Object.entries(PRESETS[name]).forEach(([k, v]) => setValue(k, v)); onChange(); });
+    chips.appendChild(b);
+  });
+  const reset = document.createElement('button');
+  reset.className = 'chip'; reset.id = 'btnReset'; reset.textContent = 'Reset N and pH to map'; reset.disabled = true;
+  reset.addEventListener('click', () => { applySoilToSliders(); onChange(); });
+  chips.appendChild(reset);
+}
+
+function setValue(key, v) {
+  const f = FIELDS.find((x) => x.key === key);
+  v = Math.min(f.max, Math.max(f.min, Number(v)));
+  state[key] = v;
+  inputs[key].value = v;
+  inputs[key].style.setProperty('--pct', ((v - f.min) / (f.max - f.min) * 100) + '%');
+  outputs[key].textContent = fmt(f, v);
+  if (key === 'ph') updatePh();
+}
+
+function applySoilToSliders() {
+  if (!soil) return;
+  if (soil.ph != null) setValue('ph', soil.ph);
+  if (soil.N != null) setValue('N', soil.N);
+}
+
+function onChange() { updateSource(); schedulePredict(); }
+
+function updateSource() {
+  let text = 'Manual inputs', cls = '';
+  if (soil) {
+    const edited = (soil.ph != null && Math.abs(state.ph - soil.ph) > 0.05) || (soil.N != null && state.N !== soil.N);
+    text = edited ? 'Live soil data + your edits' : 'Live soil data'; cls = 'ok';
+  }
+  $('#source').innerHTML = `<span class="dot ${cls}"></span><span>${text}</span>`;
+  $('#btnReset').disabled = !soil;
+}
+
+function updatePh() {
+  const pos = (state.ph - 3.5) / 6.5 * 100;
+  $('#phMarker').style.left = `calc(${pos}% - 2px)`;
+  $('#phValue').textContent = state.ph.toFixed(1);
+}
+
+/* ---------- Prediction ---------- */
+function schedulePredict() {
+  clearTimeout(predictTimer);
+  $('#results').querySelectorAll('.sec').forEach((s) => s.classList.add('busy'));
+  predictTimer = setTimeout(predict, 120);
+}
+
+async function predict() {
+  if (predictCtl) predictCtl.abort();
+  predictCtl = new AbortController();
+  try {
+    const res = await fetch('/api/predict', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(state), signal: predictCtl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(apiError(data));
+    $('#errBox').hidden = true;
+    render(data);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    $('#errBox').hidden = false;
+    $('#errBox').textContent = e.message;
+    $('#results').querySelectorAll('.sec').forEach((s) => s.classList.remove('busy'));
+  }
+}
+
+function apiError(data) {
+  if (typeof data.detail === 'string') return data.detail;
+  if (Array.isArray(data.detail)) return 'Invalid input: ' + data.detail.map((d) => d.loc.slice(-1) + ' ' + d.msg).join('; ');
+  return 'Something went wrong. Please try again.';
+}
+
+const title = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+
+function countUp(el, to) {
+  const from = Number(el.textContent) || 0;
+  if (reduceMotion || from === to) { el.textContent = to; return; }
+  const t0 = performance.now(), dur = 450;
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / dur);
+    el.textContent = Math.round(from + (to - from) * p);
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function render(r) {
+  lastResult = r;
+  $('#results').querySelectorAll('.sec').forEach((s) => s.classList.remove('busy'));
+
+  $('#cropName').textContent = title(r.crop);
+  $('#cropConf').textContent = r.top[0] ? `${Math.round(r.top[0].probability * 100)}% model confidence` : 'Best match for these conditions';
+  if (lastCrop && lastCrop !== r.crop) toast(`Best crop changed: ${title(lastCrop)} to ${title(r.crop)}`);
+  lastCrop = r.crop;
+
+  countUp($('#scoreNum'), r.score);
+  const fill = $('#scoreFill');
+  fill.style.width = r.score + '%';
+  fill.style.background = TIER_COLOR[r.tier];
+  const badge = $('#tier');
+  badge.textContent = r.tier;
+  badge.style.background = TIER_COLOR[r.tier];
+
+  $('#matches').innerHTML = r.top.length ? r.top.map((t, i) => `
+    <div class="match"><span>${title(t.crop)}</span>
+      <div class="bar"><i style="width:${Math.max(2, t.probability * 100)}%;background:${i === 0 ? 'var(--green)' : 'var(--muted)'}"></i></div>
+      <span>${Math.round(t.probability * 100)}%</span></div>`).join('')
+    : '<p class="sub">This model does not expose class probabilities.</p>';
+
+  $('#yieldImpact').textContent = r.yield_impact;
+  $('#finRisk').textContent = r.financial_risk;
+
+  const tips = $('#tips');
+  tips.className = 'tips' + (r.tier === 'Stable' ? '' : ' warn');
+  tips.innerHTML = r.tips.map((t) => `<li>${t}</li>`).join('');
+}
+
+/* ---------- Map ---------- */
+const map = L.map('map', {worldCopyJump: true}).setView([20.59, 78.96], 4);
+const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'});
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 18, attribution: 'Esri, Maxar, Earthstar Geographics'});
+street.addTo(map);
+let marker = null;
+
+function setBase(which) {
+  (which === 'sat' ? street : sat).remove();
+  (which === 'sat' ? sat : street).addTo(map);
+  $('#btnStreet').setAttribute('aria-pressed', which !== 'sat');
+  $('#btnSat').setAttribute('aria-pressed', which === 'sat');
+}
+$('#btnStreet').onclick = () => setBase('street');
+$('#btnSat').onclick = () => setBase('sat');
+$('#btnLoc').onclick = () => {
+  if (!navigator.geolocation) return toast('Location is not available in this browser.');
+  navigator.geolocation.getCurrentPosition(
+    (p) => { map.flyTo([p.coords.latitude, p.coords.longitude], 11); selectPoint(p.coords.latitude, p.coords.longitude); },
+    () => toast('Could not get your location. Check browser permissions.'),
+  );
+};
+map.on('click', (e) => { const ll = e.latlng.wrap(); selectPoint(ll.lat, ll.lng); });
+
+function mapMsg(html) {
+  const m = $('#mapMsg');
+  m.hidden = !html;
+  m.innerHTML = html || '';
+}
+
+async function selectPoint(lat, lng) {
+  const id = ++soilReq;
+  if (marker) marker.setLatLng([lat, lng]);
+  else marker = L.circleMarker([lat, lng], {radius: 9, color: '#fff', weight: 3, fillColor: '#3f6b3a', fillOpacity: 1}).addTo(map);
+  fieldLoc = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  mapMsg('<span class="spin"></span>Reading topsoil');
+  try {
+    const res = await fetch(`/api/soil?lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`);
+    const data = await res.json().catch(() => ({}));
+    if (id !== soilReq) return;  // a newer click replaced this one
+    if (!res.ok) throw new Error(apiError(data));
+    soil = data;
+    applySoilToSliders();
+    renderSoil();
+    onChange();
+    toast('Soil data loaded for this point');
+  } catch (e) {
+    if (id !== soilReq) return;
+    soil = null;
+    renderSoil();
+    updateSource();
+    toast(e.message);
+  } finally {
+    if (id === soilReq) mapMsg('');
+  }
+}
+
+function renderSoil() {
+  const box = $('#soilRead');
+  if (!soil) {
+    box.innerHTML = `<span class="hint">No live soil data for this point. Sliders keep their current values.</span><span class="where">${fieldLoc}</span>`;
+    return;
+  }
+  const stat = (v, label) => `<div class="stat"><b>${v ?? 'n/a'}</b><span>${label}</span></div>`;
+  box.innerHTML = stat(soil.ph, 'topsoil pH') + stat(soil.N, 'nitrogen index') + stat(soil.soc, 'organic carbon g/kg')
+    + `<span class="where">${fieldLoc}. Depth 0-5 cm from ISRIC SoilGrids. Nitrogen is scaled from total N, so treat it as an estimate.</span>`;
+}
+
+/* ---------- PDF ---------- */
+$('#btnPdf').addEventListener('click', async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true; btn.textContent = 'Building report';
+  try {
+    const src = $('#source').textContent.trim();
+    const res = await fetch('/api/report', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...state, location: fieldLoc, source: src}),
+    });
+    if (!res.ok) throw new Error(apiError(await res.json().catch(() => ({}))));
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement('a'), {href: url, download: 'AgriSmart_Report.pdf'});
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast('Report downloaded');
+  } catch (e) { toast(e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Download soil health card (PDF)'; }
+});
+
+/* ---------- Toast + health ---------- */
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+async function checkHealth() {
+  const el = $('#health');
+  try {
+    const h = await (await fetch('/api/health')).json();
+    el.innerHTML = `<span class="dot ${h.ok ? 'ok' : 'bad'}"></span><span>${h.ok ? 'Model ready' : 'Model unavailable'}</span>`;
+    if (!h.ok) { $('#errBox').hidden = false; $('#errBox').textContent = h.error || 'Model unavailable'; }
+  } catch {
+    el.innerHTML = '<span class="dot bad"></span><span>Server unreachable</span>';
+  }
+}
+
+buildControls();
+updatePh();
+updateSource();
+checkHealth();
+predict();
+</script>
+</body>
+</html>
