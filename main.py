@@ -4,6 +4,7 @@ Run:  uvicorn main:app --reload
 Open: http://127.0.0.1:8000
 """
 import io
+import asyncio
 import logging
 import os
 import textwrap
@@ -59,7 +60,7 @@ async def lifespan(app: FastAPI):
         app.state.model_error = f"Could not load model: {exc}"
     if app.state.model_error:
         log.error(app.state.model_error)
-    app.state.http = httpx.AsyncClient(timeout=12)
+    app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(25.0, connect=8.0))
     yield
     await app.state.http.aclose()
 
@@ -167,17 +168,27 @@ async def soil(request: Request, lat: float = Query(ge=-90, le=90), lon: float =
         return hit[1]
 
     params = [("lat", key[0]), ("lon", key[1]), ("property", "phh2o"), ("property", "nitrogen"),
-              ("property", "soc"), ("depth", "0-5cm"), ("value", "mean")]
-    try:
-        resp = await request.app.state.http.get(SOILGRIDS_URL, params=params)
-    except httpx.TimeoutException:
-        raise HTTPException(504, "SoilGrids timed out. Try again in a moment.")
-    except httpx.HTTPError:
-        raise HTTPException(502, "Could not reach SoilGrids.")
+            ("property", "soc"), ("depth", "0-5cm"), ("value", "mean")]
+    resp, last_err = None, ""
+    for attempt in range(2):  # the public API is flaky, so retry once before giving up
+        try:
+            resp = await request.app.state.http.get(SOILGRIDS_URL, params=params)
+            if resp.status_code in (200, 429):
+                break
+            last_err = f"SoilGrids returned status {resp.status_code}."
+        except httpx.TimeoutException:
+            last_err = "SoilGrids is responding slowly."
+        except httpx.HTTPError:
+            last_err = "Could not reach SoilGrids."
+        resp = None
+        if attempt == 0:
+            await asyncio.sleep(1.5)
+    if resp is None:
+        if hit:  # an older cached answer beats an error
+            return {**hit[1], "stale": True}
+        raise HTTPException(504, f"{last_err} It usually recovers within a minute, so click again.")
     if resp.status_code == 429:
         raise HTTPException(429, "SoilGrids rate limit reached (about 5 requests/min). Wait a minute and click again.")
-    if resp.status_code != 200:
-        raise HTTPException(502, f"SoilGrids returned status {resp.status_code}.")
 
     raw = {}
     try:
